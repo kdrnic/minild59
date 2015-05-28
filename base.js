@@ -112,6 +112,8 @@ function UpdateEntities(){
 }
 
 function Entity(){
+	this.width = 0xfff;
+	this.height = 0xfff;
 }
 
 Entity.prototype.Init = function(obj){
@@ -119,12 +121,18 @@ Entity.prototype.Init = function(obj){
 	this.y = obj.y << 8;
 }
 
-Entity.prototype.MapCollision = function(){
-	if(!this.solid) return false;
-	for(var x = this.x >> 12; x <= (this.x + 0xf00) >> 12; x++){
+Entity.prototype.Animate = function(spr){
+	this.sprTile = spr;
+	if((Math.abs(this.dx | 0) & 0xf00) != 0) this.sprTile += [0,1,0,2][(Math.floor(frame / 7) % 4)];
+	if(this.dx < 0) this.flipH = true;
+	if(this.dx > 0) this.flipH = false;
+}
+
+function MapCollision(box){
+	for(var x = box.x >> 12; x <= (box.x + (box.width | 0)) >> 12; x++){
 		if(x < 0) continue;
 		if(x >= map.length) continue;
-		for(var y = this.y >> 12; y <= (this.y + 0xf00) >> 12; y++){
+		for(var y = box.y >> 12; y <= (box.y + (box.height | 0)) >> 12; y++){
 			if(y < 0) continue;
 			if(y >= map[x].length) continue;
 			if((map[x][y] >= 32) && (map[x][y] < 48)) return true;
@@ -138,16 +146,18 @@ function MoveEntities(){
 		var e = entities[i];
 		if(e.dx){
 			e.x += e.dx;
-			if(e.MapCollision()){
+			if(e.solid && MapCollision(e)){
 				if(e.dx > 0) e.x -= e.x & 0xfff;
-				if(e.dx < 0) e.x += ((~(e.x & 0xfff)) >>> 0);
+				if(e.dx < 0) e.x += 1 + ((~(e.x & 0xfff)) >>> 0) & 0xfff;
+				e.dx = 0;
 			}
 		}
 		if(e.dy){
 			e.y += e.dy;
-			if(e.MapCollision()){
+			if(e.solid && MapCollision(e)){
 				if(e.dy > 0) e.y -= e.y & 0xfff;
-				if(e.dy < 0) e.y += ((~(e.y & 0xfff)) >>> 0);
+				if(e.dy < 0) e.y += 1 + ((~(e.y & 0xfff)) >>> 0) & 0xfff;
+				e.dy = 0;
 			}
 		}
 	}
@@ -165,16 +175,13 @@ function Draw(){
 function DrawEntities(){
 	for(var i = 0; i < entities.length; i++){
 		if(entities[i].hasOwnProperty("sprTile")){
-			context.drawImage(tileset[entities[i].sprTile], entities[i].x >> 8, entities[i].y >> 8);
+			context.save();
+			context.translate(8 + (entities[i].x >> 8), 8 + (entities[i].y >> 8));
+			context.scale(1 - ((entities[i].flipH | 0) << 1), 1 - ((entities[i].flipV | 0) << 1));
+			context.drawImage(tileset[entities[i].sprTile], -8, -8);
+			context.restore();
 		}
 	}
-}
-
-function Draw(){
-	context.save();
-	context.translate(-scrollX, -scrollY);
-	MapDraw();
-	context.restore();
 }
 
 function BreakImage(img, w, h){
@@ -205,9 +212,13 @@ function MapDraw(){
 }
 
 function CanvasZoom(factor){
-	if((canvas.style.width.split("px")[0] / canvas.width > 1) || (factor > 1)){
-		canvas.style.width = canvas.style.width.split("px")[0] * factor;
-		canvas.style.height = canvas.style.height.split("px")[0] * factor;
+	if(factor > 0){
+		canvas.style.width = parseInt(canvas.style.width.split("px")[0]) + canvas.width;
+		canvas.style.height = parseInt(canvas.style.height.split("px")[0]) + canvas.height;
+	}
+	else if(canvas.style.width.split("px")[0] > 256){
+		canvas.style.width = parseInt(canvas.style.width.split("px")[0]) - canvas.width;
+		canvas.style.height = parseInt(canvas.style.height.split("px")[0]) - canvas.height;
 	}
 }
 
@@ -225,16 +236,44 @@ Player.prototype.Update = function(){
 	else if(keys.keyLeft.state){
 		this.dx -= 0xf0;
 	}
-	else this.dx = this.dx >> 2;
-	if((keys.keyUp.state == 1) && (true)){
-		this.dy = -0x500;
+	else{
+		if(this.dx == -1) this.dx = 0;
+		this.dx = this.dx >> 2;
+		this.sprTile = 3;
 	}
-	else this.dy += 0x80;
+	
+	this.Animate(3);
+	
+	if((keys.keyUp.state == 1) &&
+		(MapCollision({x: this.x, y: this.y + 0x1000}) ||
+		MapCollision({x: this.x + this.width, y: this.y + 0x1000}))){
+		this.dy = -0x600;
+	}
+	else this.dy += 0x60;
+	
 	if(this.dx < -0x300) this.dx = -0x300;
 	if(this.dx > 0x300) this.dx = 0x300;
-	if(this.dy > 0x500) this.dy = 0x500;
+	if(this.dy > 0x600) this.dy = 0x500;
+	
 	scrollX = (this.x >> 8) + 8 - 128;
 	scrollY = (this.y >> 8) + 8 - 128;
+	if(scrollX < 0) scrollX = 0;
+	if(scrollX + 256 > map.length << 4) scrollX = (map.length << 4) - 256;
+	if(scrollY < 0) scrollY = 0;
+	if(scrollY + 240 > map[0].length << 4) scrollY = (map[0].length << 4) - 240;
 }
 
 entityConstructors["player"] = Player;
+
+function Potion(){
+	this.sprTile = 31;
+}
+
+function Heart(){
+	this.sprTile = 30;
+}
+
+Potion.prototype = new Entity;
+Heart.prototype = new Entity;
+entityConstructors["potion"] = Potion;
+entityConstructors["heart"] = Heart;
