@@ -51,8 +51,12 @@ function Start(){
 	canvas.addEventListener("mousedown", MouseDownEvent);
 	canvas.addEventListener("mouseup", MouseUpEvent);
 	
-	scrollX = 0;
-	scrollY = 0;
+	scroll = {
+		x: 0,
+		y: 0,
+		width: 0x10000,
+		height: 240 << 8
+	};
 	
 	var t = new Image();
 	t.onload = function(){ 
@@ -109,23 +113,9 @@ function UpdateEntities(){
 		if(typeof entities[i].Update == "function") entities[i].Update();
 	}
 	MoveEntities();
-}
-
-function Entity(){
-	this.width = 0xfff;
-	this.height = 0xfff;
-}
-
-Entity.prototype.Init = function(obj){
-	this.x = obj.x << 8;
-	this.y = obj.y << 8;
-}
-
-Entity.prototype.Animate = function(spr){
-	this.sprTile = spr;
-	if((Math.abs(this.dx | 0) & 0xf00) != 0) this.sprTile += [0,1,0,2][(Math.floor(frame / 7) % 4)];
-	if(this.dx < 0) this.flipH = true;
-	if(this.dx > 0) this.flipH = false;
+	for(var i = 0; i < entities.length; i++){
+		if(!entities[i].alive) entities.splice(i, 1);
+	}
 }
 
 function MapCollision(box){
@@ -166,7 +156,7 @@ function MoveEntities(){
 function Draw(){
 	context.fillRect(0, 0, 256, 240);
 	context.save();
-	context.translate(-scrollX, -scrollY);
+	context.translate(-scroll.x, -scroll.y);
 	MapDraw();
 	DrawEntities();
 	context.restore();
@@ -204,8 +194,8 @@ function BreakImage(img, w, h){
 
 function MapDraw(){
 	if(!window.hasOwnProperty("map")) return;
-	for(var i = Math.max(Math.floor(scrollX / 16), 0); i < Math.min(1 + Math.floor((scrollX + canvas.width) / 16), map.length); i++){
-		for(var j = Math.max(Math.floor(scrollY / 16), 0); j < Math.min(1 + Math.floor((scrollY + canvas.height) / 16), map[i].length); j++){
+	for(var i = Math.max(Math.floor(scroll.x / 16), 0); i < Math.min(1 + Math.floor((scroll.x + canvas.width) / 16), map.length); i++){
+		for(var j = Math.max(Math.floor(scroll.y / 16), 0); j < Math.min(1 + Math.floor((scroll.y + canvas.height) / 16), map[i].length); j++){
 			if(map[i][j] >= 0) context.drawImage(tileset[map[i][j]], i * 16, j * 16);
 		}
 	}
@@ -220,6 +210,33 @@ function CanvasZoom(factor){
 		canvas.style.width = parseInt(canvas.style.width.split("px")[0]) - canvas.width;
 		canvas.style.height = parseInt(canvas.style.height.split("px")[0]) - canvas.height;
 	}
+}
+
+function BoxCollision(b1, b2){
+	if(b1.x + b1.width < b2.x) return false;
+	if(b1.x > b2.x + b2.width) return false;
+	if(b1.y + b1.height < b2.y) return false;
+	if(b1.y > b2.y + b2.height) return false;
+	return true;
+}
+
+function Entity(){
+	this.width = 0xfff;
+	this.height = 0xfff;
+}
+
+Entity.prototype.alive = true;
+
+Entity.prototype.Init = function(obj){
+	this.x = obj.x << 8;
+	this.y = obj.y << 8;
+}
+
+Entity.prototype.Animate = function(spr){
+	this.sprTile = spr;
+	if((Math.abs(this.dx | 0) & 0xf00) != 0) this.sprTile += [0,1,0,2][(Math.floor(frame / 7) % 4)];
+	if(this.dx < 0) this.flipH = true;
+	if(this.dx > 0) this.flipH = false;
 }
 
 function Player(obj){
@@ -253,14 +270,14 @@ Player.prototype.Update = function(){
 	
 	if(this.dx < -0x300) this.dx = -0x300;
 	if(this.dx > 0x300) this.dx = 0x300;
-	if(this.dy > 0x600) this.dy = 0x500;
+	if(this.dy > 0x600) this.dy = 0x600;
 	
-	scrollX = (this.x >> 8) + 8 - 128;
-	scrollY = (this.y >> 8) + 8 - 128;
-	if(scrollX < 0) scrollX = 0;
-	if(scrollX + 256 > map.length << 4) scrollX = (map.length << 4) - 256;
-	if(scrollY < 0) scrollY = 0;
-	if(scrollY + 240 > map[0].length << 4) scrollY = (map[0].length << 4) - 240;
+	scroll.x = (this.x >> 8) + 8 - 128;
+	scroll.y = (this.y >> 8) + 8 - 128;
+	if(scroll.x < 0) scroll.x = 0;
+	if(scroll.x + 256 > map.length << 4) scroll.x = (map.length << 4) - 256;
+	if(scroll.y < 0) scroll.y = 0;
+	if(scroll.y + 240 > map[0].length << 4) scroll.y = (map[0].length << 4) - 240;
 }
 
 entityConstructors["player"] = Player;
@@ -277,3 +294,85 @@ Potion.prototype = new Entity;
 Heart.prototype = new Entity;
 entityConstructors["potion"] = Potion;
 entityConstructors["heart"] = Heart;
+
+function WalkingEnemy(){
+	this.flipH = true;
+	this.dy = 0;
+	this.solid = true;
+}
+
+WalkingEnemy.prototype = new Entity;
+
+WalkingEnemy.prototype.Update = function(){
+	if((!MapCollision({x: this.x, y: this.y + 0x1000})) || MapCollision({x: this.x - 1, y: this.y + 0xf00})){
+		this.flipH = false;
+	}
+	
+	if((!MapCollision({x: this.x + this.width, y: this.y + 0x1000})) || MapCollision({x: this.x + this.width + 1, y: this.y + 0xf00})){
+		this.flipH = true;
+	}
+	
+	if(!this.flipH) this.dx = 0x100;
+	else this.dx = -0x100;
+	
+	this.dy += 0x60;
+	if(this.dy > 0x600) this.dy = 0x600;
+	
+	this.Animate(12);
+}
+
+entityConstructors["enemy1"] = WalkingEnemy;
+
+function MedusaSpawner(){
+	this.period = 120;
+}
+
+MedusaSpawner.prototype = new Entity;
+
+MedusaSpawner.prototype.Init = function(obj){
+	this.width = (obj.width << 8) - 1;
+	this.height = (obj.height << 8) - 1;
+	Entity.prototype.Init.call(this, obj);
+}
+
+MedusaSpawner.prototype.Update = function(){
+	if(BoxCollision(this, {x: scroll.x << 8, y: scroll.y << 8, width: (256 << 8) - 1, height: (240 << 8) - 1}) && (frame % this.period == 0)){
+		var m = new MedusaHead();
+		m.x = (scroll.x << 8) + 0x10000;
+		m.y = this.y - (sineTable.reduce(function(a,b){return a+b}) * 3);
+		entities.push(m);
+	}
+}
+
+entityConstructors["medusa"] = MedusaSpawner;
+
+var sineTable = Array(10);
+for(var i = 0; i < sineTable.length; i++) sineTable[i] = (Math.sin((i / sineTable.length) * Math.PI * 0.5) * 0x100) | 0;
+
+function MedusaHead(){
+	this.period = 30;
+	this.sprTile = 18;
+	this.dx = -0x100;
+}
+
+MedusaHead.prototype = new Entity;
+
+MedusaHead.prototype.Update = function(){
+	switch(((frame % (this.period << 2)) / this.period) | 0){
+	case 0:
+		this.dy = sineTable[((frame % this.period) * (sineTable.length / this.period)) | 0];
+		break;
+	case 1:
+		this.dy = sineTable[(sineTable.length - 1) - (((frame % this.period) * (sineTable.length / this.period)) | 0)];
+		break;
+	case 2:
+		this.dy = 0 - sineTable[((frame % this.period) * (sineTable.length / this.period)) | 0];
+		break;
+	case 3:
+		this.dy = 0 - sineTable[(sineTable.length - 1) - (((frame % this.period) * (sineTable.length / this.period)) | 0)];
+		break;
+	}
+	this.dy = (this.dy << 1) + this.dy;
+	
+	if(this.x + this.width < scroll.x << 8) this.alive = false;
+}
