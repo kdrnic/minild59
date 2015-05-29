@@ -2,6 +2,7 @@ var mouse = {};
 var pressed = [];
 var entityConstructors = {};
 var entities = [];
+var tileTypes = [];
 
 function MouseUpEvent(event){
 	mouse.pressed[event.button] = false;
@@ -85,13 +86,17 @@ function InitMap(jsonObj){
 				map[x][y] = tileLayer.data[x + y * tileLayer.width] - 1;
 			}
 		}
+		for(var t in jsonObj.tilesets[0].tileproperties){
+			tileTypes[t] = jsonObj.tilesets[0].tileproperties[t];
+			tileTypes[t].collision = tileTypes[t].collision | 0;
+		}
 	}
 	if(objLayer){
 		for(var i = 0; i < objLayer.objects.length; i++){
 			if(!entityConstructors.hasOwnProperty(objLayer.objects[i].type)) continue;
 			var e = new entityConstructors[objLayer.objects[i].type]();
 			e.Init(objLayer.objects[i]);
-			 entities.push(e);
+			entities.push(e);
 		}
 	}
 }
@@ -125,7 +130,20 @@ function MapCollision(box){
 		for(var y = box.y >> 12; y <= (box.y + (box.height | 0)) >> 12; y++){
 			if(y < 0) continue;
 			if(y >= map[x].length) continue;
-			if((map[x][y] >= 32) && (map[x][y] < 48)) return true;
+			if(map[x][y] == -1) continue;
+			switch(tileTypes[map[x][y]].collision){
+			case 1:
+				return true;
+				break;
+			case 2:
+				if(box.hasOwnProperty("dy")){
+					if(box.y + box.height - box.dy < y << 12) return true;
+				}
+				else return true;
+				break;
+			default:
+				break;
+			}
 		}
 	}
 	return false;
@@ -242,21 +260,24 @@ Entity.prototype.Animate = function(spr){
 function Player(obj){
 	this.sprTile = 0;
 	this.solid = true;
+	this.stunCounter = 0;
 }
 
 Player.prototype = new Entity;
 
 Player.prototype.Update = function(){
-	if(keys.keyRight.state){
-		this.dx += 0xf0;
-	}
-	else if(keys.keyLeft.state){
-		this.dx -= 0xf0;
-	}
-	else{
-		if(this.dx == -1) this.dx = 0;
-		this.dx = this.dx >> 2;
-		this.sprTile = 3;
+	if(!(this.stunCounter > 0)){
+		if(keys.keyRight.state){
+			this.dx += 0xf0;
+		}
+		else if(keys.keyLeft.state){
+			this.dx -= 0xf0;
+		}
+		else{
+			if(this.dx == -1) this.dx = 0;
+			this.dx = this.dx >> 2;
+			this.sprTile = 3;
+		}
 	}
 	
 	this.Animate(3);
@@ -272,6 +293,8 @@ Player.prototype.Update = function(){
 	if(this.dx > 0x300) this.dx = 0x300;
 	if(this.dy > 0x600) this.dy = 0x600;
 	
+	if(this.stunCounter > 0) this.stunCounter--;
+	
 	scroll.x = (this.x >> 8) + 8 - 128;
 	scroll.y = (this.y >> 8) + 8 - 128;
 	if(scroll.x < 0) scroll.x = 0;
@@ -280,7 +303,32 @@ Player.prototype.Update = function(){
 	if(scroll.y + 240 > map[0].length << 4) scroll.y = (map[0].length << 4) - 240;
 }
 
+Player.prototype.Hurt = function(other){
+	if(this.y + this.height <= other.y + other.height){
+		this.dy = -8 * 0xb5;
+		this.dx = 0xb5;
+	}
+	else this.dx = 1;
+	
+	if(this.x + (this.width >> 1) > other.x + (other.width >> 1)){
+		this.dx *= 8;
+	}
+	else this.dx *= -8;
+	
+	this.stunCounter = 20;
+}
+
 entityConstructors["player"] = Player;
+
+function CheckPlayerCollision(o, f){
+	entities.forEach(function (e){
+		if(e instanceof Player){
+			if(BoxCollision(o, e)){
+				f.call(o, e);
+			}
+		}
+	});
+}
 
 function Potion(){
 	this.sprTile = 31;
@@ -317,6 +365,10 @@ WalkingEnemy.prototype.Update = function(){
 	
 	this.dy += 0x60;
 	if(this.dy > 0x600) this.dy = 0x600;
+	
+	CheckPlayerCollision(this, function(p){
+		p.Hurt(this);
+	});
 	
 	this.Animate(12);
 }
@@ -373,6 +425,10 @@ MedusaHead.prototype.Update = function(){
 		break;
 	}
 	this.dy = (this.dy << 1) + this.dy;
+	
+	CheckPlayerCollision(this, function(p){
+		p.Hurt(this);
+	});
 	
 	if(this.x + this.width < scroll.x << 8) this.alive = false;
 }
