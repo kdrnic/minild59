@@ -3,6 +3,12 @@ var pressed = [];
 var entityConstructors = {};
 var entities = [];
 var tileTypes = [];
+var lastFrameTime;
+var frameTime = 1000 / 60;
+
+function Timestamp() {
+  return window.performance && window.performance.now ? window.performance.now() : new Date().getTime();
+}
 
 function MouseUpEvent(event){
 	mouse.pressed[event.button] = false;
@@ -64,7 +70,9 @@ function Start(){
 		tileset = BreakImage(this, 16, 16);
 		LoadTextFile("level.json", function(m){
 			InitMap(JSON.parse(m));
-			window.requestAnimationFrame(DoFrame);
+			window.requestAnimationFrame(Draw);
+			lastFrameTime = Timestamp();
+			setTimeout(Update, 0.9 * frameTime);
 		});
 	}
 	t.src = "tileset.png";
@@ -101,16 +109,16 @@ function InitMap(jsonObj){
 	}
 }
 
-function DoFrame(){
-	frame++;
-	Draw();
-	Update();
-	window.requestAnimationFrame(DoFrame);
-}
-
 function Update(){
+	var t = Timestamp();
+	while(t - lastFrameTime < frameTime){
+		t = Timestamp();
+	}
+	frame++;
 	UpdateKeys();
 	UpdateEntities();
+	lastFrameTime = Timestamp();
+	setTimeout(Update, 0.95 * frameTime);
 }
 
 function UpdateEntities(){
@@ -168,6 +176,7 @@ function MoveEntities(){
 				e.dy = 0;
 			}
 		}
+		if(typeof e.EndUpdate == "function") e.EndUpdate();
 	}
 }
 
@@ -178,6 +187,7 @@ function Draw(){
 	MapDraw();
 	DrawEntities();
 	context.restore();
+	window.requestAnimationFrame(Draw);
 }
 
 function DrawEntities(){
@@ -294,7 +304,9 @@ Player.prototype.Update = function(){
 	if(this.dy > 0x600) this.dy = 0x600;
 	
 	if(this.stunCounter > 0) this.stunCounter--;
-	
+}
+
+Player.prototype.EndUpdate = function(){
 	scroll.x = (this.x >> 8) + 8 - 128;
 	scroll.y = (this.y >> 8) + 8 - 128;
 	if(scroll.x < 0) scroll.x = 0;
